@@ -1,0 +1,607 @@
+---
+title: "rraghu_projUpdate"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(DBI)
+library(tidyverse)
+library(readxl)
+library(glue)
+library(RColorBrewer)
+library(pheatmap)
+library(ComplexHeatmap)
+library(ggplot2)
+library(qvalue)
+```
+
+
+
+```{r, echo=TRUE}
+num_subj = 129
+con = dbConnect(RSQLite::SQLite(), "Covid-19_Study_DB.sqlite")
+dbListTables(con)
+dbDisconnect(con)
+```
+
+
+# Figure 3A
+
+## Protein data
+```{r}
+protein_query = 
+  "SELECT sample_id, proteomics_measurements.replicate_id, biomolecule_id,
+  normalized_abundance
+  FROM rawfiles, proteomics_runs, proteomics_measurements
+  WHERE rawfiles.rawfile_id = proteomics_runs.rawfile_id 
+  AND sample_id >= 0 
+  AND proteomics_runs.replicate_id=proteomics_measurements.replicate_id 
+  ORDER by sample_id, biomolecule_id"
+
+con = dbConnect(RSQLite::SQLite(), "Covid-19_Study_DB.sqlite")
+protein_data_sql = dbGetQuery(con, protein_query)
+dbDisconnect(con)
+
+# data check
+num_proteins_subj = rep(NA, num_subj)
+for(i in 1:num_subj) {
+  num_proteins_subj[i] = nrow(protein_data_sql[protein_data_sql[['sample_id']] == i,])
+}
+print(unique(num_proteins_subj))
+glue("All subjects have 745 proteins.")
+
+# organize into table with subjects as rows and protein abundances as columns
+protein_data = matrix(0, nrow=num_subj, ncol=num_proteins_subj[1])
+rownames(protein_data) = unique(protein_data_sql[['sample_id']])
+colnames(protein_data) = unique(protein_data_sql[['biomolecule_id']])
+for(i in 1:num_subj) {
+  protein_data[i,] = protein_data_sql[protein_data_sql[['sample_id']] == i,'normalized_abundance']
+}
+protein_data_sql = 0 # clear memory
+```
+
+# Lipid data
+```{r}
+lipid_query = 
+  "SELECT sample_id, lipidomics_measurements.replicate_id, biomolecule_id,
+  normalized_abundance
+  FROM rawfiles, lipidomics_runs, lipidomics_measurements
+  WHERE rawfiles.rawfile_id = lipidomics_runs.rawfile_id 
+  AND sample_id >= 0 
+  AND lipidomics_runs.replicate_id=lipidomics_measurements.replicate_id 
+  ORDER by sample_id, biomolecule_id"
+
+con = dbConnect(RSQLite::SQLite(), "Covid-19_Study_DB.sqlite")
+lipid_data_sql = dbGetQuery(con, lipid_query)
+dbDisconnect(con)
+
+# data check
+num_lipid_subj = rep(NA, num_subj)
+for(i in 1:num_subj) {
+  num_lipid_subj[i] = nrow(lipid_data_sql[lipid_data_sql[['sample_id']] == i,])
+}
+print(unique(num_lipid_subj))
+glue("All subjects have 7235 lipids.")
+
+# organize into table with subjects as rows and lipid abundances as columns
+lipid_data = matrix(0, nrow=num_subj, ncol=num_lipid_subj[1])
+rownames(lipid_data) = unique(lipid_data_sql[['sample_id']])
+colnames(lipid_data) = unique(lipid_data_sql[['biomolecule_id']])
+for(i in 1:num_subj) {
+  lipid_data[i,] = lipid_data_sql[lipid_data_sql[['sample_id']] == i,'normalized_abundance']
+}
+lipid_data_sql = 0 # clear memory
+```
+
+# Metabolomics data
+```{r}
+metabolite_query = 
+  "SELECT sample_id, metabolomics_measurements.replicate_id, biomolecule_id,
+  normalized_abundance
+  FROM rawfiles, metabolomics_runs, metabolomics_measurements
+  WHERE rawfiles.rawfile_id = metabolomics_runs.rawfile_id 
+  AND sample_id >= 0 
+  AND metabolomics_runs.replicate_id=metabolomics_measurements.replicate_id
+  AND normalized_abundance >= 0
+  ORDER by sample_id, biomolecule_id"
+
+glue("Some subjects had 271 metabolites while some had 486. Upon inspecting the data,
+     the ones with 486 have a 3rd run with all -1's for abundances. The second to
+     last line of the query was added to account for this.")
+
+con = dbConnect(RSQLite::SQLite(), "Covid-19_Study_DB.sqlite")
+metabolite_data_sql = dbGetQuery(con, metabolite_query)
+dbDisconnect(con)
+
+# data check
+num_metabolite_subj = rep(NA, num_subj)
+for(i in 1:num_subj) {
+  num_metabolite_subj[i] = nrow(metabolite_data_sql[metabolite_data_sql[['sample_id']] == i,])
+}
+print(unique(num_metabolite_subj))
+
+# organize into table with subjects as rows and lipid abundances as columns
+metabolite_data = matrix(0, nrow=num_subj, ncol=num_metabolite_subj[1])
+rownames(metabolite_data) = unique(metabolite_data_sql[['sample_id']])
+colnames(metabolite_data) = unique(metabolite_data_sql[['biomolecule_id']])
+for(i in 1:num_subj) {
+  metabolite_data[i,] = metabolite_data_sql[metabolite_data_sql[['sample_id']] == i,'normalized_abundance']
+}
+metabolite_data_sql = 0 # clear memory
+```
+
+# Transcriptomics data
+```{r}
+transcript_query = 
+  "SELECT sample_id, transcriptomics_measurements.replicate_id, biomolecule_id,
+  normalized_abundance
+  FROM rawfiles, transcriptomics_runs, transcriptomics_measurements
+  WHERE rawfiles.rawfile_id = transcriptomics_runs.rawfile_id 
+  AND sample_id >= 0 
+  AND transcriptomics_runs.replicate_id=transcriptomics_measurements.replicate_id
+  AND normalized_abundance >= 0
+  ORDER by sample_id, biomolecule_id"
+
+con = dbConnect(RSQLite::SQLite(), "Covid-19_Study_DB.sqlite")
+transcript_data_sql = dbGetQuery(con, transcript_query)
+dbDisconnect(con)
+
+# data check
+num_transcript_subj = rep(NA, num_subj)
+for(i in 1:num_subj) {
+  num_transcript_subj[i] = nrow(transcript_data_sql[transcript_data_sql[['sample_id']] == i,])
+}
+print(unique(num_transcript_subj))
+
+# organize into table with subjects as rows and lipid abundances as columns
+transcript_data = matrix(0, nrow=num_subj, ncol=num_transcript_subj[1])
+#rownames(transcript_data) = unique(transcript_data_sql[['sample_id']])
+rownames(transcript_data) = seq(1, num_subj)
+colnames(transcript_data) = unique(transcript_data_sql[['biomolecule_id']])
+for(i in 1:num_subj) {
+  if(i %in% transcript_data_sql[['sample_id']])
+    transcript_data[i,] = transcript_data_sql[transcript_data_sql[['sample_id']] == i,'normalized_abundance']
+}
+transcript_data_sql = 0 # clear memory
+```
+
+# Biomolecule names
+```{r, echo=TRUE}
+name_query = 
+  "SELECT biomolecule_id, standardized_name, omics_id
+  FROM biomolecules"
+
+con = dbConnect(RSQLite::SQLite(), "Covid-19_Study_DB.sqlite")
+names = dbGetQuery(con, name_query)
+dbDisconnect(con)
+```
+
+# Patient data
+```{r, echo=TRUE}
+status_query = "SELECT sample_id, covid, hospital_free_days_45, sofa, 
+                charlson_score, icu_1 
+                FROM deidentified_patient_metadata
+                ORDER BY sample_id"
+con = dbConnect(RSQLite::SQLite(), "Covid-19_Study_DB.sqlite")
+patient_data = dbGetQuery(con, status_query)
+dbDisconnect(con)
+colnames(patient_data) = c('sample_id', 'cov_status', 'hfd', 'sofa', 'charlson', 'icu')
+```
+
+# Calculation of correlation coefficients
+```{r, echo=TRUE}
+# combine lipids and metabolites
+lip_met_data = cbind(lipid_data, metabolite_data)
+glue("We use Kendall's tau correlation to avoid the assumption of normality.")
+corr = matrix(0, nrow=ncol(protein_data), ncol=ncol(lip_met_data))
+for(protein in 1:ncol(protein_data)) {
+  for(lip_met in 1:ncol(lip_met_data)) {
+    corr[protein, lip_met] = cor.test(protein_data[,protein], lip_met_data[,lip_met],
+                                      method="kendall")$estimate
+  }
+}
+rownames(corr) = colnames(protein_data)
+colnames(corr) = colnames(lip_met_data)
+```
+
+# forgot to grab pvalues
+```{r, echo=TRUE}
+corr_pvals = matrix(0, nrow=ncol(protein_data), ncol=ncol(lip_met_data))
+for(protein in 1:ncol(protein_data)) {
+  for(lip_met in 1:ncol(lip_met_data)) {
+    corr_pvals[protein, lip_met] = cor.test(protein_data[,protein], lip_met_data[,lip_met],
+                                      method="kendall")$p.value
+  }
+}
+rownames(corr_pvals) = colnames(protein_data)
+colnames(corr_pvals) = colnames(lip_met_data)
+```
+
+```{r, echo=TRUE}
+corr = read.csv("crossome_corr.csv", check.names = FALSE, row.names = 1)
+corr_pvals = read.csv("corr_pvals.csv", check.names = FALSE, row.names = 1)
+```
+
+# Fig 3A - Clustering heatmap
+```{r, echo=TRUE}
+# extract rows and columns which have at least one tau above threshold
+thresh= 0.4
+rows_to_keep = (rowSums(abs(corr) > thresh) > 0)
+cols_to_keep = (colSums(abs(corr) > thresh) > 0)
+corr_thresh = corr[rows_to_keep,]
+corr_thresh = corr_thresh[,cols_to_keep]
+
+# patient metadata correlations
+qval_thresh = 0.05
+corr_covid_protein = rep(NA, ncol(protein_data))
+corr_hfd_protein = rep(NA, ncol(protein_data))
+for(protein in 1:ncol(protein_data)) {
+    corr_covid_protein[protein] = cor.test(protein_data[,protein], patient_data$cov_status,
+                                      method="kendall")$p.value
+    corr_hfd_protein[protein] = cor.test(protein_data[,protein], patient_data$hfd,
+                                      method="kendall")$p.value
+}
+qvals_protein_cov = qvalue(corr_covid_protein)$qvalues
+qvals_protein_cov_bin = (qvals_protein_cov < qval_thresh)
+qvals_protein_cov_bin = qvals_protein_cov_bin[rows_to_keep]
+qvals_protein_hfd = qvalue(corr_hfd_protein)$qvalues
+qvals_protein_hfd_bin = (qvals_protein_hfd < qval_thresh)
+qvals_protein_hfd_bin = qvals_protein_hfd_bin[rows_to_keep]
+
+
+corr_covid_lipmet = rep(NA, ncol(lip_met_data))
+corr_hfd_lipmet = rep(NA, ncol(lip_met_data))
+for(lipmet in 1:ncol(lip_met_data)) {
+    corr_covid_lipmet[lipmet] = cor.test(lip_met_data[,lipmet], patient_data$cov_status,
+                                      method="kendall")$p.value
+    corr_hfd_lipmet[lipmet] = cor.test(lip_met_data[,lipmet], patient_data$hfd,
+                                      method="kendall")$p.value
+}
+qvals_lipmet_cov = qvalue(corr_covid_lipmet)$qvalues
+qvals_lipmet_cov_bin = (qvals_lipmet_cov < qval_thresh)
+qvals_lipmet_cov_bin = qvals_lipmet_cov_bin[cols_to_keep]
+qvals_lipmet_hfd = qvalue(corr_hfd_lipmet)$qvalues
+qvals_lipmet_hfd_bin = (qvals_lipmet_hfd < qval_thresh)
+qvals_lipmet_hfd_bin = qvals_lipmet_hfd_bin[cols_to_keep]
+
+# extract p values
+corr_pvals_thresh = corr_pvals[rows_to_keep,cols_to_keep]
+corr_pvals_thresh_adj = corr_pvals_thresh * (nrow(corr_pvals)*ncol(corr_pvals))
+sig_func = function(j, i, x, y, w, h, fill) {
+  if(corr_pvals_thresh_adj[i, j] < 0.05) {
+		grid.text("*", x, y)
+	}
+}
+
+ha_left = rowAnnotation(" " = qvals_protein_cov_bin,
+                        "  " = qvals_protein_hfd_bin,
+                        col = list(" " = c("TRUE"="dark blue", "FALSE"="white"),
+                                   "  " = c("TRUE"="dark red", "FALSE"="white")),
+                        show_legend = FALSE)
+
+ha_top = HeatmapAnnotation("q < 0.05 with COVID" = qvals_lipmet_cov_bin,
+                           "q < 0.05 with HFD" = qvals_lipmet_hfd_bin,
+                           col = list("q < 0.05 with COVID" 
+                                      = c("TRUE"="dark blue", "FALSE"="white"),
+                                      "q < 0.05 with HFD" 
+                                      = c("TRUE"="dark red", "FALSE"="white")),
+                           show_legend = FALSE, 
+                           annotation_name_gp = gpar(fontsize=6))
+
+heatmapA = Heatmap(corr_thresh, row_split = 6, column_split = 6,
+                   show_row_dend = FALSE, show_column_dend = FALSE,
+                   show_row_names = FALSE, show_column_names = FALSE,
+                   row_title = 'Plasma proteins', 
+                   column_title = 'Plasma metabolites and lipids',
+                   row_gap = unit(0, "mm"), column_gap = unit(0, "mm"),
+                   border=TRUE, left_annotation = ha_left, 
+                   top_annotation = ha_top, 
+                   name = "Kendall Tau")
+heatmapA
+```
+
+# Clustering with original tau's provided in data as a check
+```{r, echo=TRUE}
+corr_given = read.csv("original_corr.csv", check.names = FALSE, row.names = 1, stringsAsFactors = FALSE)
+corr_given_thresh = corr_given[(rowSums(abs(corr_given) > thresh) > 0),]
+corr_given_thresh = corr_given_thresh[,(colSums(abs(corr_given) > thresh) > 0)]
+my_palette <- colorRampPalette(c("red", "white", "blue"))(n = 299)
+heatmap(as.matrix(corr_given_thresh), col=my_palette, co)
+```
+
+# Fig 3B
+```{r, echo=TRUE}
+protein_cluster_nums = c(2, 6)
+lip_met_cluster_nums = c(1, 4)
+protein_cluster_idx = c(row_order(heatmapA)[[2]], row_order(heatmapA)[[6]])
+clusters = corr_thresh[protein_cluster_idx,]
+lipmet_cluster_idx = c(column_order(heatmapA)[[1]], column_order(heatmapA)[[4]])
+clusters = clusters[,lipmet_cluster_idx]
+protein_names = names[names$biomolecule_id %in% rownames(clusters),"standardized_name"]
+protein_common_names = read.csv('protein_name_mappings.csv')
+lipmet_names = names[names$biomolecule_id %in% colnames(clusters),"standardized_name"]
+subset_names = rep(NA, length(lipmet_names))
+for(i in 1:length(lipmet_names)) {
+  if(grepl("unknown", lipmet_names[i], ignore.case = TRUE)) {
+    subset_names[i] = " "
+  } else {
+    subset_names[i] = lipmet_names[i]
+  }
+}
+
+qvals_protein_clust_cov_bin = qvals_protein_cov_bin[protein_cluster_idx]
+qvals_protein_clust_hfd_bin = qvals_protein_hfd_bin[protein_cluster_idx]
+qvals_lipmet_clust_cov_bin = qvals_lipmet_cov_bin[lipmet_cluster_idx]
+qvals_lipmet_clust_hfd_bin = qvals_lipmet_hfd_bin[lipmet_cluster_idx]
+
+corr_pvals_thresh_adj_cluster = corr_pvals_thresh_adj[protein_cluster_idx, lipmet_cluster_idx]
+
+sig_func = function(j, i, x, y, w, h, fill) {
+  if(corr_pvals_thresh_adj_cluster[i, j] < 0.05) {
+		grid.text("*", x, y)
+	}
+}
+
+ha_left = rowAnnotation(" " = qvals_protein_clust_cov_bin,
+                        "  " = qvals_protein_clust_hfd_bin,
+                        col = list(" " = c("TRUE"="dark blue", "FALSE"="white"),
+                                   "  " = c("TRUE"="dark red", "FALSE"="white")),
+                        show_legend = FALSE)
+
+ha_top = HeatmapAnnotation("q < 0.05 with COVID" = qvals_lipmet_clust_cov_bin,
+                           "q < 0.05 with HFD" = qvals_lipmet_clust_hfd_bin,
+                           col = list("q < 0.05 with COVID" 
+                                      = c("TRUE"="dark blue", "FALSE"="white"),
+                                      "q < 0.05 with HFD" 
+                                      = c("TRUE"="dark red", "FALSE"="white")),
+                           show_legend = FALSE, 
+                           annotation_name_gp = gpar(fontsize=6))
+
+
+heatmapB = Heatmap(clusters, row_labels = protein_common_names$protein_name, 
+                   row_names_gp = gpar(fontsize=5), show_column_names = FALSE,
+                   column_names_gp = gpar(fontsize=5), left_annotation = ha_left,
+                   top_annotation = ha_top, name = "Kendall Tau",
+                   cell_fun = sig_func)
+heatmapB
+```
+
+# Fig 3Ca
+
+```{r, echo=TRUE}
+
+go_data = read.csv('goa_human_reduced.csv')
+#filter for only processes
+go_data = go_data[go_data$go_aspect == "P",]
+
+# background annotations
+all_protein_names = names[names$biomolecule_id %in% rownames(corr),"standardized_name"]
+# get just the first ID associated with each protein
+all_names_stripped = c(lapply(all_protein_names[1:115], substr, 1, 10), 
+                   lapply(all_protein_names[116:745], substr, 1, 6))
+bg_go = go_data[go_data$protein_id %in% all_names_stripped, c(1,3)]
+bg_go = unique(bg_go)
+
+# cluster annotations
+names_stripped = c(lapply(protein_names[1:2], substr, 1, 10),
+                   lapply(protein_names[3:42], substr, 1, 6))
+diff_go = go_data[go_data$protein_id %in% names_stripped, c(1,3)]
+diff_go = unique(diff_go)
+
+# enrichment analysis
+go_ids = unique(bg_go$go_id)
+N = length(unique(bg_go$protein_id))
+n = length(unique(diff_go$protein_id))
+enrich_data = data.frame(matrix(nrow=length(go_ids),ncol=5))
+for(i in 1:length(go_ids)) {
+  id = go_ids[i]
+  K = nrow(bg_go[bg_go$go_id == id,])
+  k = nrow(diff_go[diff_go$go_id == id,])
+  fold_enrichment = (k/n)/(K/N)
+  pvalue = phyper(k-1, K, N-K, n, lower.tail = FALSE)
+  row = list(id, K, k, fold_enrichment, pvalue)
+  enrich_data[i,] = row
+}
+
+# multiple testing corrections
+p_thresh = 0.05
+adj_pvals = p.adjust(enrich_data[,5], method="fdr")
+enrich_data = cbind(enrich_data, adj_pvals)
+colnames(enrich_data) = c("GO ID", "# genes-background",
+                      "# genes-diff", "Fold enrichment", "p-value",
+                      "Adj. p-value")
+thresholded = enrich_data[adj_pvals < p_thresh,]
+thresholded = thresholded[order(thresholded[,6]),]
+
+enrich_data = enrich_data[order(enrich_data[,6]),]
+
+go_pvals = -log(enrich_data[1:2, 6], base=10)
+labels = c("acute-phase response", "cellular oxidant detoxification")
+y = barplot(go_pvals, main="Plasma protein process enrichment", horiz = TRUE,
+            col = "dark red", xlab = "-log(p-value)")
+text(0.05, y, labels, col = "white", adj=0)
+```
+
+# Fig 3Cb
+```{r, echo=TRUE}
+# confirm classes instead of discovering them
+all_lipmet_names = names[names$biomolecule_id %in% colnames(lip_met_data),"standardized_name"]
+N = length(all_lipmet_names)
+n = length(lipmet_names)
+
+K = sum(lapply(all_lipmet_names, substr, 1, 2) == "PC")
+k = sum(lapply(lipmet_names, substr, 1, 2) == "PC")
+fold_enrichment = (k/n)/(K/N)
+pval_PC = phyper(k-1, K, N-K, n, lower.tail = FALSE)
+
+K = sum(lapply(all_lipmet_names, substr, 1, 12) == "Plasmenyl-PC")
+k = sum(lapply(lipmet_names, substr, 1, 12) == "Plasmenyl-PC")
+fold_enrichment = (k/n)/(K/N)
+pval_plasmenyl_PC = phyper(k-1, K, N-K, n, lower.tail = FALSE)
+
+K = sum(lapply(all_lipmet_names, substr, 1, 12) == "Plasmanyl-PC")
+k = sum(lapply(lipmet_names, substr, 1, 12) == "Plasmanyl-PC")
+fold_enrichment = (k/n)/(K/N)
+pval_plasmanyl_PC = phyper(k-1, K, N-K, n, lower.tail = FALSE)
+
+K = 0
+k = 0
+for(name in all_lipmet_names)
+  if(grepl("PC ", name)) {K = K + 1}
+for(name in lipmet_names)
+  if(grepl("PC ", name)) {k = k + 1}
+fold_enrichment = (k/n)/(K/N)
+pval_all_PC = phyper(k-1, K, N-K, n, lower.tail = FALSE)
+
+class_pvals = -log(c(pval_plasmenyl_PC, pval_plasmanyl_PC, pval_all_PC), base=10)
+labels = c("Plasmenyl-PC", "Plasmanyl-PC", "All PCs")
+y = barplot(class_pvals, main="Plasma lipid class enrichment", horiz = TRUE,
+            col = "dark green", xlab = "-log(p-value)")
+text(0.30, y, labels, col = "white", adj=0)
+```
+
+# Fig 3Ea
+```{r, echo=TRUE}
+gsn_data = read.csv("gelsolin_reduced.csv")
+
+# boxplot
+hfd_cgsn = as.data.frame(cbind(patient_data$cov_status, patient_data$hfd, gsn_data$log2_cGSN))
+colnames(hfd_cgsn) = c('cov_status', 'hfd', 'log2_cGSN')
+groupn = rep(-1, nrow(hfd_cgsn))
+status = rep(' ', nrow(hfd_cgsn))
+for(i in 1:nrow(hfd_cgsn)) {
+  if(hfd_cgsn$cov_status[i] == 1) {
+    status[i] = 'COVID-19'
+    if(hfd_cgsn$hfd[i] < 5)
+      groupn[i] = '1'
+    else if(hfd_cgsn$hfd[i] > 40)
+      groupn[i] = '3'
+    else
+      groupn[i] = '2'
+  }
+  else {
+    status[i] = 'non-COVID-19'
+    if(hfd_cgsn$hfd[i] < 5)
+      groupn[i] = '4'
+    else if(hfd_cgsn$hfd[i] > 40)
+      groupn[i] = '6'
+    else
+      groupn[i] = '5'
+  }
+}
+hfd_cgsn = cbind(hfd_cgsn, groupn, status)
+
+box_cGSN = ggplot(hfd_cgsn, aes(groupn, log2_cGSN, colour=status))
+box_cGSN + geom_boxplot() + geom_jitter(width = 0.2) + ggtitle('cGSN') +
+  xlab("HFDs") + ylab("log2(intensity)") + 
+  scale_x_discrete(labels=c("< 5", "5 - 40", "> 40", "< 5", "5 - 40", "> 40")) +
+  labs(colour = "COVID Status")
+
+# covid status regression
+status_model_cGSN = lm(cov_status ~ log2_cGSN, hfd_cgsn)
+
+# hfd regression
+cov_hfd_model_cGSN = lm(hfd ~ log2_cGSN, hfd_cgsn[hfd_cgsn$cov_status==1,])
+noncov_hfd_model_cGSN = lm(hfd ~ log2_cGSN, hfd_cgsn[hfd_cgsn$cov_status==0,])
+```
+
+# Fig 3Eb
+```{r, echo=TRUE}
+# boxplot
+hfd_cgsn = as.data.frame(cbind(patient_data$cov_status, patient_data$hfd, gsn_data$log2_pGSN))
+colnames(hfd_cgsn) = c('cov_status', 'hfd', 'log2_pGSN')
+groupn = rep(-1, nrow(hfd_cgsn))
+status = rep(' ', nrow(hfd_cgsn))
+for(i in 1:nrow(hfd_cgsn)) {
+  if(hfd_cgsn$cov_status[i] == 1) {
+    status[i] = 'COVID-19'
+    if(hfd_cgsn$hfd[i] < 5)
+      groupn[i] = '1'
+    else if(hfd_cgsn$hfd[i] > 40)
+      groupn[i] = '3'
+    else
+      groupn[i] = '2'
+  }
+  else {
+    status[i] = 'non-COVID-19'
+    if(hfd_cgsn$hfd[i] < 5)
+      groupn[i] = '4'
+    else if(hfd_cgsn$hfd[i] > 40)
+      groupn[i] = '6'
+    else
+      groupn[i] = '5'
+  }
+}
+hfd_cgsn = cbind(hfd_cgsn, groupn, status)
+
+box_pGSN = ggplot(hfd_cgsn, aes(groupn, log2_pGSN, colour=status))
+box_pGSN + geom_boxplot() + geom_jitter(width = 0.2) + ggtitle('pGSN') +
+  xlab("HFDs") + ylab("log2(intensity)") + 
+  scale_x_discrete(labels=c("< 5", "5 - 40", "> 40", "< 5", "5 - 40", "> 40"))
+
+# covid status regression
+status_model_pGSN = lm(cov_status ~ log2_pGSN, hfd_cgsn)
+
+# hfd regression
+cov_hfd_model_pGSN = lm(hfd ~ log2_pGSN, hfd_cgsn[hfd_cgsn$cov_status==1,])
+noncov_hfd_model_pGSN = lm(hfd ~ log2_pGSN, hfd_cgsn[hfd_cgsn$cov_status==0,])
+```
+
+# Fig 3Ec
+```{r, echo=TRUE}
+# boxplot
+hfd_cgsn = as.data.frame(cbind(patient_data$cov_status, patient_data$hfd, gsn_data$log2_totalGSN))
+colnames(hfd_cgsn) = c('cov_status', 'hfd', 'log2_totalGSN')
+groupn = rep(-1, nrow(hfd_cgsn))
+status = rep(' ', nrow(hfd_cgsn))
+for(i in 1:nrow(hfd_cgsn)) {
+  if(hfd_cgsn$cov_status[i] == 1) {
+    status[i] = 'COVID-19'
+    if(hfd_cgsn$hfd[i] < 5)
+      groupn[i] = '1'
+    else if(hfd_cgsn$hfd[i] > 40)
+      groupn[i] = '3'
+    else
+      groupn[i] = '2'
+  }
+  else {
+    status[i] = 'non-COVID-19'
+    if(hfd_cgsn$hfd[i] < 5)
+      groupn[i] = '4'
+    else if(hfd_cgsn$hfd[i] > 40)
+      groupn[i] = '6'
+    else
+      groupn[i] = '5'
+  }
+}
+hfd_cgsn = cbind(hfd_cgsn, groupn, status)
+
+box_pGSN = ggplot(hfd_cgsn, aes(groupn, log2_totalGSN, colour=status))
+box_pGSN + geom_boxplot() + geom_jitter(width = 0.2) + ggtitle('total GSN') +
+  xlab("HFDs") + ylab("log2(intensity)") + 
+  scale_x_discrete(labels=c("< 5", "5 - 40", "> 40", "< 5", "5 - 40", "> 40"))
+
+# covid status regression
+status_model_totalGSN = lm(cov_status ~ log2_totalGSN, hfd_cgsn)
+
+# hfd regression
+cov_hfd_model_totalGSN = lm(hfd ~ log2_totalGSN, hfd_cgsn[hfd_cgsn$cov_status==1,])
+noncov_hfd_model_totalGSN = lm(hfd ~ log2_totalGSN, hfd_cgsn[hfd_cgsn$cov_status==0,])
+```
+
+# Fig 3F
+```{r, echo=TRUE}
+sofa_gsn = as.data.frame(cbind(patient_data$hfd, patient_data$sofa, 
+                               patient_data$icu, gsn_data$log2_pGSN))
+sofa_gsn = sofa_gsn[sofa_gsn[[3]] != 0, c(2,4)]
+#sofa_gsn = sofa_gsn[, c(2,4)]
+colnames(sofa_gsn) = c('sofa', 'log2_pGSN')
+sofa_plot = ggplot(sofa_gsn, aes(x=sofa, y=log2_pGSN))
+sofa_plot = sofa_plot + geom_point() + geom_smooth(method = "lm", se = TRUE) +
+  xlab("SOFA Score") + ylab("pGSN log(intensity)") + 
+  ggtitle("pGSN relative abundance vs. SOFA score")
+sofa_plot
+
+sofa_model = lm(log2_pGSN ~ sofa, sofa_gsn)
+```
